@@ -3,9 +3,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Vision HUD Super</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
   <style>
     body, html {
       margin: 0;
@@ -44,6 +42,7 @@
       display: flex;
       gap: 10px;
       left: 10px;
+      flex-wrap: wrap;
     }
     button {
       background: #0f0;
@@ -95,36 +94,15 @@
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    const synth = window.speechSynthesis;
-    function speak(text) {
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.pitch = 1.5;
-      utter.rate = 1;
-      synth.speak(utter);
-    }
-
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      .then(stream => video.srcObject = stream);
-
-    let nightVision = false;
-    let thermal = false;
-    let predator = false;
-    let showGrid = true;
+    let nightVision = false, thermal = false, predator = false, showGrid = true;
 
     function toggleNightVision() {
       nightVision = !nightVision;
       document.body.style.background = nightVision ? '#030' : 'black';
     }
-    function toggleThermal() {
-      thermal = !thermal;
-    }
-    function togglePredator() {
-      predator = !predator;
-    }
-    function toggleGrid() {
-      showGrid = !showGrid;
-      grid.style.display = showGrid ? 'block' : 'none';
-    }
+    function toggleThermal() { thermal = !thermal; }
+    function togglePredator() { predator = !predator; }
+    function toggleGrid() { grid.style.display = (showGrid = !showGrid) ? 'block' : 'none'; }
 
     let recorder, recordedChunks = [];
     function startRecording() {
@@ -142,9 +120,7 @@
       };
       recorder.start();
     }
-    function stopRecording() {
-      if (recorder) recorder.stop();
-    }
+    function stopRecording() { if (recorder) recorder.stop(); }
     function captureScreenshot() {
       const link = document.createElement('a');
       link.download = 'screenshot-ai.png';
@@ -152,46 +128,40 @@
       link.click();
     }
 
-    Promise.all([cocoSsd.load(), blazeface.load()]).then(([model, faceModel]) => {
-      hudText.innerText = 'AI: Active';
-      setInterval(async () => {
+    async function startAI() {
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+      );
+      const objectDetector = await ObjectDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/lite_model/float16.tflite' },
+        scoreThreshold: 0.5,
+        runningMode: 'VIDEO'
+      });
+
+      function render() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        if (thermal) {
-          ctx.fillStyle = 'rgba(255,0,0,0.1)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-        if (predator) {
-          ctx.fillStyle = 'rgba(255,0,255,0.1)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-
-        const preds = await model.detect(video);
-        preds.forEach(pred => {
-          ctx.strokeStyle = predator ? 'magenta' : (thermal ? 'red' : '#0f0');
-          ctx.lineWidth = 2;
-          ctx.strokeRect(pred.bbox[0], pred.bbox[1], pred.bbox[2], pred.bbox[3]);
-          ctx.fillStyle = ctx.strokeStyle;
-          ctx.font = '16px Orbitron';
-          ctx.fillText(pred.class, pred.bbox[0], pred.bbox[1] - 5);
-          if (Math.random() < 0.01) speak(pred.class + ' detected');
+        if (thermal) ctx.fillStyle = 'rgba(255,0,0,0.1)', ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (predator) ctx.fillStyle = 'rgba(255,0,255,0.1)', ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const now = performance.now();
+        objectDetector.detectForVideo(video, now, results => {
+          results.detections.forEach(det => {
+            const box = det.boundingBox;
+            ctx.strokeStyle = predator ? 'magenta' : (thermal ? 'red' : '#0f0');
+            ctx.lineWidth = 2;
+            ctx.strokeRect(box.originX, box.originY, box.width, box.height);
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.fillText(det.categories[0].categoryName, box.originX, box.originY - 5);
+          });
         });
+        requestAnimationFrame(render);
+      }
+      render();
+    }
 
-        const facePreds = await faceModel.estimateFaces(video, false);
-        facePreds.forEach(face => {
-          const top = face.topLeft;
-          const bot = face.bottomRight;
-          ctx.strokeStyle = '#0ff';
-          ctx.strokeRect(top[0], top[1], bot[0] - top[0], bot[1] - top[1]);
-          ctx.fillStyle = '#0ff';
-          ctx.fillText('Face', top[0], top[1] - 5);
-        });
-      }, 500);
-    });
-
-    window.addEventListener("deviceorientation", (e) => {
-      hudText.innerText = `X:${e.alpha.toFixed(1)} Y:${e.beta.toFixed(1)} Z:${e.gamma.toFixed(1)}`;
-    });
-  </script>
-</body>
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then(stream => {
+        video.srcObject = stream;
+        video.onloadeddata = () => startAI();
+      });
+  </script></body>
 </html>
