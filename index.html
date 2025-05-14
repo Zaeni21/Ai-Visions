@@ -1,64 +1,39 @@
-<!DOCTYPE html><html lang="en">
+<!DOCTYPE html>
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Vision HUD Super</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
+  <title>AI Vision Interaktif</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
   <style>
     body, html {
-      margin: 0;
-      padding: 0;
-      background: black;
+      margin: 0; padding: 0; background: black;
       font-family: 'Orbitron', sans-serif;
       overflow: hidden;
     }
     video, canvas {
       position: fixed;
-      top: 0; left: 0;
-      width: 100vw;
-      height: 100vh;
-      object-fit: cover;
-      z-index: 1;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      object-fit: cover; z-index: 1;
     }
-    #canvas {
-      z-index: 2;
-      pointer-events: none;
-    }
-    .hudText, .controls {
-      position: absolute;
-      z-index: 4;
-      top: 10px;
-      left: 10px;
+    canvas.nightvision { filter: brightness(1.1) contrast(1.2) hue-rotate(90deg); }
+    canvas.thermal { filter: brightness(1.1) contrast(1.5) sepia(1) hue-rotate(-30deg); }
+    canvas.predator { filter: contrast(2) hue-rotate(280deg) saturate(3); }
+    #canvas { z-index: 2; pointer-events: none; }
+    .hudText, .controls, .apikey {
+      position: absolute; z-index: 4;
       background: rgba(0, 255, 0, 0.1);
-      padding: 10px;
-      border: 1px solid #0f0;
-      border-radius: 10px;
-      text-shadow: 0 0 5px #0f0;
-      color: #0f0;
+      padding: 10px; border: 1px solid #0f0;
+      border-radius: 10px; text-shadow: 0 0 5px #0f0;
+      color: #0f0; font-family: 'Orbitron';
     }
-    .controls {
-      top: auto;
-      bottom: 10px;
-      display: flex;
-      gap: 10px;
-      left: 10px;
-      flex-wrap: wrap;
-    }
-    button {
-      background: #0f0;
-      color: black;
-      font-family: 'Orbitron';
-      border: none;
-      padding: 10px;
-      border-radius: 5px;
-      cursor: pointer;
-    }
+    .controls { bottom: 10px; left: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .apikey { top: 10px; right: 10px; }
     .glitch, .grid {
-      position: fixed;
-      width: 100vw;
-      height: 100vh;
-      z-index: 3;
-      pointer-events: none;
+      position: fixed; width: 100vw; height: 100vh;
+      z-index: 3; pointer-events: none;
     }
     .glitch {
       background: repeating-linear-gradient(0deg, rgba(0,255,0,0.02), rgba(0,255,0,0.02) 1px, transparent 1px, transparent 2px);
@@ -68,6 +43,13 @@
       background: repeating-linear-gradient(90deg, rgba(0,255,255,0.05) 0px, rgba(0,255,255,0.05) 1px, transparent 1px, transparent 40px),
                   repeating-linear-gradient(0deg, rgba(0,255,255,0.05) 0px, rgba(0,255,255,0.05) 1px, transparent 1px, transparent 40px);
     }
+    button {
+      background: #0f0; color: black;
+      font-family: 'Orbitron';
+      border: none; padding: 10px;
+      border-radius: 5px; cursor: pointer;
+    }
+    input { padding: 6px; width: 200px; font-family: monospace; }
   </style>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
 </head>
@@ -76,7 +58,7 @@
   <canvas id="canvas"></canvas>
   <div class="glitch"></div>
   <div class="grid"></div>
-  <div class="hudText" id="hudText">AI: Initializing...</div>
+  <div class="hudText" id="hudText">AI: Lagi nyiapin otak...</div>
   <div class="controls">
     <button onclick="toggleNightVision()">Night Vision</button>
     <button onclick="toggleThermal()">Thermal</button>
@@ -85,24 +67,22 @@
     <button onclick="captureScreenshot()">Screenshot</button>
     <button onclick="startRecording()">Start Rec</button>
     <button onclick="stopRecording()">Stop Rec</button>
-  </div>  <script>
+    <button onclick="startChat()">Ngobrol</button>
+  </div>
+  <div class="apikey">
+    <label for="key">OpenAI API Key:</label><br>
+    <input type="password" id="key" placeholder="sk-...">
+  </div>
+
+  <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const hudText = document.getElementById('hudText');
     const grid = document.querySelector('.grid');
+    const keyInput = document.getElementById('key');
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-
-    let nightVision = false, thermal = false, predator = false, showGrid = true;
-
-    function toggleNightVision() {
-      nightVision = !nightVision;
-      document.body.style.background = nightVision ? '#030' : 'black';
-    }
-    function toggleThermal() { thermal = !thermal; }
-    function togglePredator() { predator = !predator; }
-    function toggleGrid() { grid.style.display = (showGrid = !showGrid) ? 'block' : 'none'; }
 
     let recorder, recordedChunks = [];
     function startRecording() {
@@ -128,40 +108,91 @@
       link.click();
     }
 
-    async function startAI() {
-      const vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-      );
-      const objectDetector = await ObjectDetector.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/lite_model/float16.tflite' },
-        scoreThreshold: 0.5,
-        runningMode: 'VIDEO'
-      });
+    function toggleNightVision() { canvas.classList.toggle('nightvision'); }
+    function toggleThermal() { canvas.classList.toggle('thermal'); }
+    function togglePredator() { canvas.classList.toggle('predator'); }
+    function toggleGrid() { grid.style.display = grid.style.display === 'none' ? 'block' : 'none'; }
 
-      function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (thermal) ctx.fillStyle = 'rgba(255,0,0,0.1)', ctx.fillRect(0, 0, canvas.width, canvas.height);
-        if (predator) ctx.fillStyle = 'rgba(255,0,255,0.1)', ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const now = performance.now();
-        objectDetector.detectForVideo(video, now, results => {
-          results.detections.forEach(det => {
-            const box = det.boundingBox;
-            ctx.strokeStyle = predator ? 'magenta' : (thermal ? 'red' : '#0f0');
-            ctx.lineWidth = 2;
-            ctx.strokeRect(box.originX, box.originY, box.width, box.height);
-            ctx.fillStyle = ctx.strokeStyle;
-            ctx.fillText(det.categories[0].categoryName, box.originX, box.originY - 5);
-          });
-        });
-        requestAnimationFrame(render);
-      }
-      render();
+    function speakIndo(text) {
+      const voices = speechSynthesis.getVoices();
+      const indoVoice = voices.find(v => v.lang.includes('id') && v.name.toLowerCase().includes('female')) || voices[0];
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.voice = indoVoice;
+      utter.lang = 'id-ID';
+      utter.pitch = 1.4;
+      utter.rate = 1.1;
+      speechSynthesis.speak(utter);
+    }
+
+    async function chatWithAI(message) {
+      const apiKey = keyInput.value;
+      if (!apiKey) return;
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4",
+          messages: [
+            { role: "system", content: "Kamu adalah AI cewek gaul yang suka ngobrol dengan gaya santai dan lucu." },
+            { role: "user", content: message }
+          ]
+        })
+      });
+      const data = await res.json();
+      const reply = data.choices?.[0]?.message?.content;
+      if (reply) speakIndo(reply);
+    }
+
+    function startChat() {
+      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = 'id-ID';
+      recognition.start();
+      hudText.innerText = 'Dengerin kamu nih...';
+      recognition.onresult = (event) => {
+        const text = event.results[0][0].transcript;
+        hudText.innerText = 'Kamu: ' + text;
+        chatWithAI(text);
+      };
     }
 
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       .then(stream => {
         video.srcObject = stream;
-        video.onloadeddata = () => startAI();
+        video.onloadedmetadata = () => {
+          video.play();
+          runAI();
+        };
       });
-  </script></body>
+
+    async function runAI() {
+      const model = await cocoSsd.load();
+      const faceModel = await blazeface.load();
+      hudText.innerText = 'AI: Aktif beb!';
+      setInterval(async () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const preds = await model.detect(video);
+        preds.forEach(pred => {
+          ctx.strokeStyle = '#0f0';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(pred.bbox[0], pred.bbox[1], pred.bbox[2], pred.bbox[3]);
+          ctx.fillStyle = '#0f0';
+          ctx.font = '16px Orbitron';
+          ctx.fillText(pred.class, pred.bbox[0], pred.bbox[1] - 5);
+        });
+        const facePreds = await faceModel.estimateFaces(video, false);
+        facePreds.forEach(face => {
+          const top = face.topLeft;
+          const bot = face.bottomRight;
+          ctx.strokeStyle = '#0ff';
+          ctx.strokeRect(top[0], top[1], bot[0] - top[0], bot[1] - top[1]);
+          ctx.fillStyle = '#0ff';
+          ctx.fillText('Muka', top[0], top[1] - 5);
+        });
+      }, 3500);
+    }
+  </script>
+</body>
 </html>
