@@ -2,17 +2,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Vision Map HUD</title>
+  <title>AI Vision HUD Super</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
   <style>
     body, html {
-      margin: 0; padding: 0;
+      margin: 0;
+      padding: 0;
       background: black;
       font-family: 'Orbitron', sans-serif;
-      color: #0ff;
       overflow: hidden;
     }
     video, canvas {
@@ -24,44 +23,51 @@
       z-index: 1;
     }
     #canvas {
-      z-index: 2; pointer-events: none;
-      mix-blend-mode: lighten;
+      z-index: 2;
+      pointer-events: none;
     }
-    #gps, #hudText {
+    .hudText, .controls {
       position: absolute;
-      z-index: 3;
+      z-index: 4;
       top: 10px;
       left: 10px;
-      background: rgba(0, 255, 255, 0.1);
+      background: rgba(0, 255, 0, 0.1);
       padding: 10px;
-      border: 1px solid #0ff;
+      border: 1px solid #0f0;
       border-radius: 10px;
-      text-shadow: 0 0 5px #0ff;
+      text-shadow: 0 0 5px #0f0;
+      color: #0f0;
     }
-    #map {
-      position: fixed;
-      bottom: 0;
-      right: 0;
-      width: 40vw;
-      height: 40vh;
-      z-index: 4;
-      border: 2px solid #0ff;
-      border-radius: 10px 0 0 0;
+    .controls {
+      top: auto;
+      bottom: 10px;
+      display: flex;
+      gap: 10px;
+      left: 10px;
     }
-    .glitch {
+    button {
+      background: #0f0;
+      color: black;
+      font-family: 'Orbitron';
+      border: none;
+      padding: 10px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .glitch, .grid {
       position: fixed;
       width: 100vw;
       height: 100vh;
-      background: repeating-linear-gradient(
-        0deg,
-        rgba(0,255,255,0.02),
-        rgba(0,255,255,0.02) 1px,
-        transparent 1px,
-        transparent 2px
-      );
-      z-index: 5;
-      mix-blend-mode: screen;
+      z-index: 3;
       pointer-events: none;
+    }
+    .glitch {
+      background: repeating-linear-gradient(0deg, rgba(0,255,0,0.02), rgba(0,255,0,0.02) 1px, transparent 1px, transparent 2px);
+      mix-blend-mode: screen;
+    }
+    .grid {
+      background: repeating-linear-gradient(90deg, rgba(0,255,255,0.05) 0px, rgba(0,255,255,0.05) 1px, transparent 1px, transparent 40px),
+                  repeating-linear-gradient(0deg, rgba(0,255,255,0.05) 0px, rgba(0,255,255,0.05) 1px, transparent 1px, transparent 40px);
     }
   </style>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
@@ -70,17 +76,25 @@
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
   <div class="glitch"></div>
-  <div id="gps">GPS: Loading...</div>
-  <div id="hudText">AI: Initializing...</div>
-  <div id="map"></div>  <script>
+  <div class="grid"></div>
+  <div class="hudText" id="hudText">AI: Initializing...</div>
+  <div class="controls">
+    <button onclick="toggleNightVision()">Night Vision</button>
+    <button onclick="toggleThermal()">Thermal</button>
+    <button onclick="togglePredator()">Predator</button>
+    <button onclick="toggleGrid()">Grid</button>
+    <button onclick="captureScreenshot()">Screenshot</button>
+    <button onclick="startRecording()">Start Rec</button>
+    <button onclick="stopRecording()">Stop Rec</button>
+  </div>  <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const hudText = document.getElementById('hudText');
+    const grid = document.querySelector('.grid');
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    // Audio feedback
     const synth = window.speechSynthesis;
     function speak(text) {
       const utter = new SpeechSynthesisUtterance(text);
@@ -89,49 +103,95 @@
       synth.speak(utter);
     }
 
-    // Start video
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       .then(stream => video.srcObject = stream);
 
-    // Load model
-    cocoSsd.load().then(model => {
+    let nightVision = false;
+    let thermal = false;
+    let predator = false;
+    let showGrid = true;
+
+    function toggleNightVision() {
+      nightVision = !nightVision;
+      document.body.style.background = nightVision ? '#030' : 'black';
+    }
+    function toggleThermal() {
+      thermal = !thermal;
+    }
+    function togglePredator() {
+      predator = !predator;
+    }
+    function toggleGrid() {
+      showGrid = !showGrid;
+      grid.style.display = showGrid ? 'block' : 'none';
+    }
+
+    let recorder, recordedChunks = [];
+    function startRecording() {
+      const stream = canvas.captureStream();
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = e => recordedChunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'recorded-ai.webm';
+        a.click();
+        recordedChunks = [];
+      };
+      recorder.start();
+    }
+    function stopRecording() {
+      if (recorder) recorder.stop();
+    }
+    function captureScreenshot() {
+      const link = document.createElement('a');
+      link.download = 'screenshot-ai.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+
+    Promise.all([cocoSsd.load(), blazeface.load()]).then(([model, faceModel]) => {
       hudText.innerText = 'AI: Active';
-      setInterval(() => {
-        model.detect(video).then(predictions => {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          predictions.forEach(pred => {
-            ctx.strokeStyle = '#0ff';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(pred.bbox[0], pred.bbox[1], pred.bbox[2], pred.bbox[3]);
-            ctx.fillStyle = '#0ff';
-            ctx.font = '16px Orbitron';
-            ctx.fillText(pred.class, pred.bbox[0], pred.bbox[1] - 5);
-            if (Math.random() < 0.02) speak(pred.class + ' detected');
-          });
+      setInterval(async () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (thermal) {
+          ctx.fillStyle = 'rgba(255,0,0,0.1)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        if (predator) {
+          ctx.fillStyle = 'rgba(255,0,255,0.1)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        const preds = await model.detect(video);
+        preds.forEach(pred => {
+          ctx.strokeStyle = predator ? 'magenta' : (thermal ? 'red' : '#0f0');
+          ctx.lineWidth = 2;
+          ctx.strokeRect(pred.bbox[0], pred.bbox[1], pred.bbox[2], pred.bbox[3]);
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.font = '16px Orbitron';
+          ctx.fillText(pred.class, pred.bbox[0], pred.bbox[1] - 5);
+          if (Math.random() < 0.01) speak(pred.class + ' detected');
+        });
+
+        const facePreds = await faceModel.estimateFaces(video, false);
+        facePreds.forEach(face => {
+          const top = face.topLeft;
+          const bot = face.bottomRight;
+          ctx.strokeStyle = '#0ff';
+          ctx.strokeRect(top[0], top[1], bot[0] - top[0], bot[1] - top[1]);
+          ctx.fillStyle = '#0ff';
+          ctx.fillText('Face', top[0], top[1] - 5);
         });
       }, 500);
     });
 
-    // GPS
-    const gps = document.getElementById('gps');
-    navigator.geolocation.getCurrentPosition(pos => {
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      gps.innerText = `GPS: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-
-      // Map
-      const map = L.map('map').setView([lat, lon], 13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
-      L.marker([lat, lon]).addTo(map);
-    }, err => {
-      gps.innerText = 'GPS: Access Denied';
-    });
-
-    // Motion detection (optional future use)
     window.addEventListener("deviceorientation", (e) => {
-      hudText.innerText = `AI: Orientation X:${e.alpha.toFixed(1)} Y:${e.beta.toFixed(1)} Z:${e.gamma.toFixed(1)}`;
+      hudText.innerText = `X:${e.alpha.toFixed(1)} Y:${e.beta.toFixed(1)} Z:${e.gamma.toFixed(1)}`;
     });
-  </script></body>
+  </script>
+</body>
 </html>
